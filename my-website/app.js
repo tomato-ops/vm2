@@ -3,56 +3,50 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { connect } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const JWT_SECRET = 'your_jwt_secret_key'; // Change this to your own secret key
 
-// Middleware
-app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static('public'));
 
-// In-memory user database (replace this with a real database in production)
-const users = [];
-
-// Register endpoint
-app.post('/register', async (req, res) => {
-    try {
-        // Hash the user's password
-        const hashedPassword = await bcrypt.hash(req.body.password, 10);
-        
-        // Create a new user object
-        const user = { username: req.body.username, password: hashedPassword };
-        
-        // Add the user to the in-memory database
-        users.push(user);
-        
-        res.status(201).send('User registered successfully');
-    } catch (error) {
-        res.status(500).send('Error registering user');
-    }
+// Display the signup form
+app.get('/signup', (req, res) => {
+    res.sendFile(__dirname + '/signup.html');
 });
 
-// Login endpoint
-app.post('/login', async (req, res) => {
-    const user = users.find(u => u.username === req.body.username);
-    
-    if (user == null) {
-        return res.status(400).send('User not found');
-    }
+// Handle signup form submission
+app.post('/signup', async (req, res) => {
+    const db = await connect();
+    const users = db.collection('users');
 
     try {
-        // Check if the provided password matches the hashed password
-        if (await bcrypt.compare(req.body.password, user.password)) {
-            // Generate a JWT token
-            const token = jwt.sign({ username: user.username }, 'secret');
-            res.json({ token });
-        } else {
-            res.status(401).send('Incorrect password');
+        // Check if the username already exists
+        const existingUser = await users.findOne({ username: req.body.username });
+        if (existingUser) {
+            return res.status(400).send('Username already exists');
         }
+
+        // Hash the password
+        const hashedPassword = await bcrypt.hash(req.body.password, 10);
+
+        // Insert the new user into the database
+        await users.insertOne({ username: req.body.username, password: hashedPassword });
+
+        // Generate JWT token
+        const token = jwt.sign({ username: req.body.username }, JWT_SECRET);
+
+        // Send the response with registration success message and token
+        res.status(201).json({ message: 'Registration successful! Here is your token', token });
     } catch (error) {
-        res.status(500).send('Error logging in');
+        console.error('Error registering user:', error);
+        res.status(500).send('Error registering user');
     }
 });
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
+
